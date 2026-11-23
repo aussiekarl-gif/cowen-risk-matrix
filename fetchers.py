@@ -44,6 +44,17 @@ import streamlit as st
 
 BASE = "https://bitcoin-data.com/v1"
 
+def _env(var: str) -> Optional[str]:
+    """Return the value of an env var, or a Streamlit secret (from
+    `.streamlit/secrets.toml`) when the env var is not set."""
+    v = os.environ.get(var)
+    if v:
+        return v
+    try:
+        return st.secrets.get(var) or None
+    except Exception:
+        return None
+
 # Canonical columns produced by fetch_live_df() — consumed by app.derive_series().
 # endpoint: canonical column emitted.
 BG_SERIES = {
@@ -194,7 +205,7 @@ def fetch_bgeometrics_hodl_waves() -> Optional[pd.DataFrame]:
 def _bgeometrics_headers() -> dict:
     """Send BGEOMETRICS_TOKEN / BITCOIN_DATA_API_TOKEN as a Bearer token if set."""
     for var in ("BGEOMETRICS_TOKEN", "BITCOIN_DATA_API_TOKEN"):
-        token = os.environ.get(var)
+        token = _env(var)
         if token:
             return {"Authorization": f"Bearer {token}"}
     return {}
@@ -218,7 +229,7 @@ def _rhodl_from_hodl(hodl: pd.DataFrame) -> Optional[pd.Series]:
 # ---------------------------------------------------------------------------
 
 def _cq_v1_get(path: str):
-    key = os.environ.get("CRYPTOQUANT_API_KEY")
+    key = _env("CRYPTOQUANT_API_KEY")
     if not key:
         return None
     payload = _get_json(f"{CQ_V1_URL}/{path}", headers={"Authorization": f"Bearer {key}"})
@@ -239,7 +250,7 @@ def _cq_v1_fills(out: dict) -> None:
 def fetch_cryptoquant_series(path: str) -> Optional[pd.Series]:
     """Fetch a CryptoQuant community endpoint (requires CQ_API_KEY env var)
     and extract the first date/value series found in the response."""
-    key = os.environ.get("CQ_API_KEY")
+    key = _env("CQ_API_KEY")
     if not key:
         return None
     payload = _get_json(f"https://api.cryptoquant.com/v2/community/{path}",
@@ -296,7 +307,7 @@ def fetch_cryptoquant_series(path: str) -> Optional[pd.Series]:
 # ---------------------------------------------------------------------------
 
 def _coinglass_fills(out: dict) -> None:
-    key = os.environ.get("COINGLASS_API_KEY")
+    key = _env("COINGLASS_API_KEY")
     headers = {"CG-API-KEY": key} if key else None
     for col, targets in COINGLASS_FILLS.items():
         if col in out:
@@ -372,7 +383,7 @@ def _extract_series(payload, candidates: list[str]) -> Optional[pd.Series]:
 
 def fetch_coingecko_market_cap() -> Optional[float]:
     """Current spot market cap of Bitcoin (single value) from CoinGecko."""
-    key = os.environ.get("COINGECKO_API")
+    key = _env("COINGECKO_API")
     headers = {"x-cg-pro-api-key": key} if key else None
     payload = _get_json(
         "https://api.coingecko.com/api/v3/coins/bitcoin?localization=false&tickers=false&market_data=true",
@@ -388,7 +399,7 @@ def fetch_coingecko_market_cap() -> Optional[float]:
 
 def _manual_realised_price() -> Optional[float]:
     """MANUAL_REALISED_PRICE_USD (or US spelling) — constant realized price in USD."""
-    raw = os.environ.get("MANUAL_REALISED_PRICE_USD") or os.environ.get("MANUAL_REALIZED_PRICE_USD")
+    raw = _env("MANUAL_REALISED_PRICE_USD") or _env("MANUAL_REALIZED_PRICE_USD")
     if not raw:
         return None
     try:

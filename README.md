@@ -60,8 +60,8 @@ the "1y–2y" band).  For the exact Glassnode/TradingView RHODL, upload a CSV.
 All token fetchers are opportunistic — each is wrapped in error handling, and
 if a token is missing or rejected, the app silently falls back.  **GitHub
 secrets are not readable via the GitHub API**, so export the tokens as
-environment variables (e.g. `export CRYPTOQUANT_API_KEY=...`) or paste them
-into the app's environment — the app reads env vars.
+environment variables (e.g. `export CRYPTOQUANT_API_KEY=...`) or set them in
+Streamlit secrets (`.streamlit/secrets.toml`) — the app reads both.
 
 | Token | Source | Fills (opportunistic) |
 |---|---|---|

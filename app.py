@@ -83,6 +83,56 @@ METRICS: dict[str, dict] = {
     },
 }
 
+# Interpretation notes — one per metric (direction: higher raw value = higher risk, all nine).
+METRIC_NOTES: dict[str, str] = {
+    "PuellMultiple": (
+        "Miner-profitability oscillator: daily issuance value (USD) ÷ 365-day moving average. "
+        "High (≥ ~2× normal) = miners' revenue running above yearly average — historically precedes macro tops; "
+        "Low (< ~1) = miners losing money — bottoms."
+    ),
+    "MVRV": (
+        "Market Cap ÷ Realized Cap — valuation gap above the supply's average entry basis. "
+        "High (> ~2.5) = late-cycle stretch; low (~1–1.2) = near bottoms."
+    ),
+    "MVRVZScore": (
+        "(Market Cap − Realized Cap) ÷ σ(Market Cap) — same gap in standardized dollar terms; "
+        "sharper regime-boundary signal than the ratio."
+    ),
+    "TransactionFees": (
+        "Average fee pressure (USD value of fees per day, or sat/vB) vs historical norms; "
+        "spikes during bull phases raise risk (fees are part of miner revenue)."
+    ),
+    "TerminalPrice": (
+        "Terminal Price = Transferred Price × 21,000,000 (Transferred Price = CDD ÷ (supply × market age)). "
+        "When terminal price ≈ spot price, tops have formed."
+    ),
+    "MCTC": (
+        "Market Cap ÷ Thermocap (cumulative miner revenue). Historically > ~10 is top-like; "
+        "dropping below ~2 can mark bottoms (CoinMetrics)."
+    ),
+    "mCTC": (
+        "Miner Cap ÷ Thermocap — value of coins held by miners vs total thermocap. "
+        "High = miners hold unusually large value; low = distributed/sold."
+    ),
+    "RHODL": (
+        "Realized Value of 1-week coins ÷ 1y–2y coins × market age; late-cycle heat = recent "
+        "turnover dominating mature held value. Cowen sets weight 0 (less reliable signal)."
+    ),
+    "SupplyP/L": (
+        "% of circulating supply priced above last-moved price; high = most coins above cost basis "
+        "(late cycle). Cowen sets weight 0."
+    ),
+}
+
+# Risk tiers: risk band → DCA multiplier → note (Cowen method, CryptoGates/Cryptonews).
+RISK_TIERS: list[tuple[str, str, str]] = [
+    ("0 – 0.1", "3x", "Floor / accumulation zone — most aggressive DCA (Cowen: bottoms often form once risk < 0.1)"),
+    ("0.1 – 0.2", "2x", "Accumulation — DCA 2x"),
+    ("0.2 – 0.3", "1x", "Early-cycle — DCA base level"),
+    ("> 0.3", "0 (skip)", "Late-cycle — no new buys; keep cash"),
+    ("> 0.5", "SELL", "High risk — sell or slow down"),
+]
+
 
 # ---------------------------------------------------------------------------
 # Series derivation — transcribed from public sources (see README.md)
@@ -287,11 +337,20 @@ def main() -> None:
     st.metric("Total Risk (0 = floor, 1 = top)", f"{total:.3f}")
     st.caption(band_label(total))
 
-    # ---- dynamic DCA matrix ----------------------------------------------
+    # ---- dynamic DCA matrix + interpretation ------------------------------
     st.subheader("Dynamic DCA (risk matrix)")
-    st.table(dca_matrix_table())
     amount, note = dca_action(total)
-    st.markdown(f"**Current → {amount}** — {note}")
+    st.markdown(f"**Current risk: {total:.3f} → {amount}** — {note}")
+    st.table(dca_matrix_table())
+
+    st.subheader("Risk interpretation & per-metric notes")
+    st.markdown(f"**Current tier:** {band_label(total)}")
+    st.table(pd.DataFrame(RISK_TIERS, columns=["risk band", "DCA multiplier", "meaning"]))
+    with st.expander("Per-metric notes (all 9)"):
+        st.table(pd.DataFrame(
+            [{"metric": METRICS[k]["label"], "note": METRIC_NOTES[k]} for k in METRICS],
+            columns=["metric", "note"],
+        ))
 
 
 if __name__ == "__main__":

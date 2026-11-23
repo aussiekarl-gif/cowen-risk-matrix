@@ -16,6 +16,80 @@ Total On-Chain Risk = Σ w_i · r_i / Σ w_i      (w_i = slider weight, 0–1)
 which keeps the 0–1 scale of Cowen's gauge. The **dynamic-DCA risk matrix** below
 is Cowen's (per CryptoGates / his videos).
 
+## Data sources
+
+### 1. LIVE (default) — BGeometrics, anonymous and free
+
+Automatically fetched by the app when you don't upload a CSV:
+
+- **Source:** [BGeometrics](https://bitcoin-data.com) — "Free plan: No
+  registration needed — just call the API directly."
+- **Limit:** 10 requests / hour (hourly counter on your IP).  The app caches
+  the live bundle for 30 minutes, so reruns are free; use the refresh
+  button in the sidebar to refetch.
+- **Series:** last ~4 years of daily data, all anonymous.
+
+**Live coverage:**
+
+| Cowen metric | Source series |
+|---|---|
+| Puell Multiple | `GET /v1/puell-multiple` |
+| MVRV | `GET /v1/mvrv` |
+| MVRV Z-Score | `GET /v1/mvrv-zscore` |
+| Terminal Price | `GET /v1/terminal-price` |
+| Thermocap (MCTC numerator) | `GET /v1/thermo-cap` |
+| MCTC (= market cap ÷ thermo cap) | `GET /v1/market-cap` ÷ `GET /v1/thermo-cap` |
+| Supply P/L | `GET /v1/profit-loss` (× 100) |
+| RHODL (approximation — see below) | `GET /v1/realized-cap-hodl-waves` |
+| Transaction Fees | — (no free live source) |
+| mCTC | — (no free live source) |
+
+**RHODL approximation (BGeometrics):** BGeometrics has no RHODL endpoint in the
+free plan, so the app computes
+
+```
+RHODL ≈ (RealizedValue(1-week band) / RealizedValue(1y–2y band)) × market age in days
+      = (age_1w_1m ÷ age_1y_2y) × (date − 2009-01-03).days
+```
+
+using the HODL-band series (`age_1w_1m` as the "1-week" proxy, `age_1y_2y` as
+the "1y–2y" band).  For the exact Glassnode/TradingView RHODL, upload a CSV.
+
+### 2. LIVE (optional) — CryptoQuant community, free account
+
+If you set the `CQ_API_KEY` environment variable (from
+[cryptoquant.com](https://cryptoquant.com), free account), the app fills
+missing canonical series from CryptoQuant's free community endpoints
+(e.g. MVRV Z-Score).  Market-indicator data on CryptoQuant requires
+Professional+ — those are **not** used by this app.
+
+### 3. CSV import — CoinMetrics / Glassnode / Coinglass Pro / CoreCharts
+
+Upload a CSV when you want the exact Glassnode/CoinMetrics values, or when a
+metric has no free live source (Transaction Fees, mCTC, exact RHODL, Terminal
+Price via your own CDD series, ...).  Expected columns (one per metric):
+
+| column | meaning |
+|---|---|
+| `date` | timestamp (optional; pandas default index used otherwise) |
+| `market_cap` | BTC market cap, USD — Glassnode Studio "Market Cap" |
+| `realized_cap` | Realized cap, USD — Glassnode Studio "Realized Cap" |
+| `mvrv` | MVRV ratio — Glassnode/CoreCharts (or `market_cap` + `realized_cap`) |
+| `mvrv_zscore` | MVRV Z-Score — Glassnode/CoreCharts (or derived from market cap + realized cap) |
+| `puell_multiple` | or supply `daily_issuance_usd` → Puell derived in-app (issuance ÷ 365d MA) |
+| `transaction_fees_usd` | daily USD value of fees paid |
+| `terminal_price` | or `cdd_cumulative_usd` + `market_age_days` + `circulating_supply` → derived in-app: (CDD ÷ (supply × age)) × 21,000,000 |
+| `thermo_cap` (or `thermocap_usd`) | cumulative miner revenue, USD — CoinMetrics `ThermoCap` / `RevAllTimeUSD` |
+| `miner_cap_usd` | coins held by miners (CoinMetrics `SplyMiner0HopAllUSD` + `SplyMiner1HopAllUSD`) |
+| `rhodl_ratio` | RHODL Ratio — CoreCharts/Glassnode export / TradingView |
+| `supply_in_profit_pct` | Supply in Profit % — CoreCharts export |
+| `circulating_supply` | BTC circulating supply |
+
+- **Glassnode Studio:** export the needed series as CSV and merge on `date`.
+- **CoinMetrics API:** fetch `MCTC`, `ThermoCap`, `MinerCap`, `RevAllTimeUSD` etc.
+- **Coinglass Pro:** export Terminal Price / RHODL / Average Fee data.
+- **CoreCharts:** export "Supply in Profit and Loss", "RHODL Ratio", "MVRV Z-Score", "Puell Multiple".
+
 ## Formulas (all verified from public sources)
 
 | # | Metric | Formula (Cowen / public sources) |
@@ -51,33 +125,6 @@ the **normalized weighted mean** `Σ w_i r_i / Σ w_i`:
 | 0.2 – 0.3 | 1x | base amount |
 | > 0.3 | 0 (skip) | "no buy, keep the cash" |
 | > 0.5 | SELL | "area to sell or slow down" |
-
-## Importing raw series (CSV)
-
-Put any of these columns in a CSV and upload it in the app (one row per date):
-
-| column | meaning |
-|---|---|
-| `date` | timestamp (optional; pandas default index used otherwise) |
-| `market_cap` | BTC market cap, USD — Glassnode Studio "Market Cap" |
-| `realized_cap` | Realized cap, USD — Glassnode Studio "Realized Cap" |
-| `puell_multiple` | or supply `daily_issuance_usd` → Puell derived in-app (issuance ÷ 365d MA) |
-| `transaction_fees_usd` | daily USD value of fees paid |
-| `terminal_price` | or `cdd_cumulative_usd` + `market_age_days` + `circulating_supply` → derived in-app: (CDD ÷ (supply × age)) × 21,000,000 |
-| `thermocap_usd` | cumulative miner revenue, USD — CoinMetrics `ThermoCap` / `RevAllTimeUSD` |
-| `miner_cap_usd` | coins held by miners (CoinMetrics `SplyMiner0HopAllUSD` + `SplyMiner1HopAllUSD`) |
-| `rhodl_ratio` | RHODL Ratio — CoreCharts export / TradingView |
-| `supply_in_profit_pct` | Supply in Profit % — CoreCharts export |
-| `circulating_supply` | BTC circulating supply |
-
-- **Glassnode Studio:** export the needed series (Market Cap, Realized Cap,
-  Puell Multiple, RHODL Ratio, Thermocap, Thermocap Multiple, etc.) as CSV,
-  concatenate/merge on `date`, upload.
-- **CoinMetrics API:** fetch `MCTC`, `ThermoCap`, `MinerCap`, `RevAllTimeUSD`
-  etc. into a CSV.
-- **Coinglass Pro:** export Terminal Price / RHODL / Average Fee data.
-- **CoreCharts:** export "Supply in Profit and Loss", "RHODL Ratio",
-  "MVRV Z-Score", "Puell Multiple".
 
 ## Run the app
 

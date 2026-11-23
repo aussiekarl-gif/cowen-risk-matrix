@@ -6,34 +6,33 @@ Pipeline: nine metrics -> per-metric 0–1 risk score (historical percentile of
 the current value) -> weighted composite "Total On-Chain Risk" (0–1) ->
 dynamic-DCA risk matrix.
 
-Import raw series as CSV with any of these columns (see README.md for the
-export instructions per source):
-
-    date, market_cap, realized_cap,
-    puell_multiple            # or supply: daily_issuance_usd (derived below)
-    transaction_fees_usd      # daily USD value of fees paid
-    terminal_price            # or: cdd_cumulative_usd + market_age_days
-                              #     + circulating_supply (derived below)
-    thermocap_usd             # cumulative miner revenue (USD) — CoinMetrics "ThermoCap"
-    miner_cap_usd             # value of coins held by miners
-    rhodl_ratio               # RHODL Ratio — CoreCharts/Glassnode export
-    supply_in_profit_pct      # Supply in Profit % — CoreCharts export
-    circulating_supply
+Data sources:
+  1. LIVE (default): BGeometrics (bitcoin-data.com) — anonymous, free plan
+     (no registration needed; 10 requests/hour; last ~4 years of data).
+     See fetchers.py.  Optional: CryptoQuant free-account community
+     endpoints via the CQ_API_KEY env var.
+  2. CSV import: raw series as columns (see README.md — export instructions
+     for Glassnode Studio / CoinMetrics / Coinglass Pro / CoreCharts, plus
+     the list of CSV-only metrics).
 
 Run:    pip install -r requirements.txt && streamlit run app.py
 """
 
 from __future__ import annotations
 
+from typing import Optional
+
 import pandas as pd
 import streamlit as st
+
+import fetchers
 
 # ---------------------------------------------------------------------------
 # Metric registry
 # ---------------------------------------------------------------------------
 # All nine metrics are "risk-up": a higher raw value means higher risk.
-# (Cowen's private 0–1 mapping is approximated below by the historical
-# percentile recipe.)
+# (Cowen's private 0–1 mapping is approximated by the historical percentile
+# recipe — see risk_score() below.)
 
 METRICS: dict[str, dict] = {
     "PuellMultiple": {
@@ -63,12 +62,12 @@ METRICS: dict[str, dict] = {
     },
     "MCTC": {
         "label": "MCTC",
-        "formula": "market_cap / thermocap_usd",
+        "formula": "market_cap / thermo_cap",
         "default_weight": 1.0,
     },
     "mCTC": {
         "label": "mCTC",
-        "formula": "miner_cap_usd / thermocap_usd",
+        "formula": "miner_cap_usd / thermo_cap",
         "default_weight": 1.0,
     },
     "RHODL": {
@@ -138,61 +137,81 @@ RISK_TIERS: list[tuple[str, str, str]] = [
 # Series derivation — transcribed from public sources (see README.md)
 # ---------------------------------------------------------------------------
 
+def _col(df: pd.DataFrame, *names: str) -> Optional[pd.Series]:
+    """First column present in df with at least one non-NaN value."""
+    for n in names:
+        if n in df and df[n].notna().any():
+            return df[n]
+    return None
+
+
 def derive_series(df: pd.DataFrame) -> dict[str, pd.Series]:
+    """Compute the 9 risk metrics' raw series from an input DataFrame.
+
+    Accepts both CSV columns (Glassnode/CoinMetrics/Coinglass/CoreCharts
+    exports) and the canonical live columns from fetchers.fetch_live_df()
+    (BGeometrics free API: 'mvrv', 'mvrv_zscore', 'puell_multiple',
+    'terminal_price', 'thermo_cap', 'market_cap', 'rhodl_ratio', ...).
+    """
     s: dict[str, pd.Series] = {}
 
-    # 1) Puell Multiple: Daily issuance value (USD) ÷ 365-day MA of it.
-    if "puell_multiple" in df:
-        s["PuellMultiple"] = pd.to_numeric(df["puell_multiple"])
-    elif "daily_issuance_usd" in df:
-        v = pd.to_numeric(df["daily_issuance_usd"])
-        s["PuellMultiple"] = v / v.rolling(365, min_periods=365).mean()
+    mc = _col(df, "market_cap")
+    rc = _col(df, "realized_cap")
+    tc = _col(df, "thermo_cap", "thermocap_usd")
 
-    # 2)–3) MVRV and MVRV Z-Score (Glassnode/CoreCharts):
+    # 1–2) MVRV and MVRV Z-Score
     #    MVRV = Market Cap / Realized Cap
     #    MVRVZScore = (Market Cap − Realized Cap) / σ(Market Cap)
-    if {"market_cap", "realized_cap"}.issubset(df):
-        mc = pd.to_numeric(df["market_cap"])
-        rc = pd.to_numeric(df["realized_cap"])
+    if (m := _col(df, "mvrv", "mvrv_ratio")) is not None:
+        s["MVRV"] = m
+    elif mc is not None and rc is not None:
         s["MVRV"] = mc / rc
+    if (z := _col(df, "mvrv_zscore", "mvrv_z", "mvrv_zScore")) is not None:
+        s["MVRVZScore"] = z
+    elif mc is not None and rc is not None:
         sd = mc.std()
         if sd is not None and sd > 0:
             s["MVRVZScore"] = (mc - rc) / sd
 
+    # 3) Puell Multiple: Daily issuance value (USD) ÷ 365-day MA of it.
+    if (p := _col(df, "puell_multiple")) is not None:
+        s["PuellMultiple"] = p
+    elif (v := _col(df, "daily_issuance_usd")) is not None:
+        s["PuellMultiple"] = v / v.rolling(365, min_periods=365).mean()
+
     # 4) Transaction Fees: average fee pressure (USD value of fees per day).
-    if "transaction_fees_usd" in df:
-        s["TransactionFees"] = pd.to_numeric(df["transaction_fees_usd"])
+    if (f := _col(df, "transaction_fees_usd", "average_fee_usd")) is not None:
+        s["TransactionFees"] = f
 
     # 5) Terminal Price (Checkmate/BlockHorizon):
     #    Transferred Price = CDD / (Existing Supply × Market Age)
     #    Terminal Price    = Transferred Price × 21,000,000
-    if "terminal_price" in df:
-        s["TerminalPrice"] = pd.to_numeric(df["terminal_price"])
+    if (tp := _col(df, "terminal_price")) is not None:
+        s["TerminalPrice"] = tp
     elif (
-        {"cdd_cumulative_usd", "market_age_days"}.issubset(df)
-        and "circulating_supply" in df
+        (cdd := _col(df, "cdd_cumulative_usd")) is not None
+        and (age := _col(df, "market_age_days")) is not None
+        and mc is not None
+        and (supply := _col(df, "circulating_supply")) is not None
     ):
-        cdd = pd.to_numeric(df["cdd_cumulative_usd"])
-        supply = pd.to_numeric(df["circulating_supply"])
-        age = pd.to_numeric(df["market_age_days"])
         s["TerminalPrice"] = (cdd / (supply * age)) * 21_000_000
 
     # 6) MCTC: Market Cap ÷ Thermocap (Cointelegraph/CoinMetrics RevAllTimeUSD).
-    if {"market_cap", "thermocap_usd"}.issubset(df):
-        s["MCTC"] = pd.to_numeric(df["market_cap"]) / pd.to_numeric(df["thermocap_usd"])
+    if mc is not None and tc is not None:
+        s["MCTC"] = mc / tc
 
     # 7) mCTC: Miner Cap ÷ Thermocap. Miner Cap = value of coins held by miners
     #    (CoinMetrics SplyMiner0HopAllUSD + SplyMiner1HopAllUSD).
-    if {"miner_cap_usd", "thermocap_usd"}.issubset(df):
-        s["mCTC"] = pd.to_numeric(df["miner_cap_usd"]) / pd.to_numeric(df["thermocap_usd"])
+    if (mcap := _col(df, "miner_cap_usd")) is not None and tc is not None:
+        s["mCTC"] = mcap / tc
 
     # 8) RHODL Ratio: (Realized Value of 1-week coins ÷ 1y–2y coins) × market age (days).
-    if "rhodl_ratio" in df:
-        s["RHODL"] = pd.to_numeric(df["rhodl_ratio"])
+    if (r := _col(df, "rhodl_ratio")) is not None:
+        s["RHODL"] = r
 
     # 9) Supply P/L: % of circulating supply whose current price > last-moved price.
-    if "supply_in_profit_pct" in df:
-        s["SupplyP/L"] = pd.to_numeric(df["supply_in_profit_pct"])
+    if (p := _col(df, "supply_in_profit_pct")) is not None:
+        s["SupplyP/L"] = p
 
     return s
 
@@ -267,33 +286,44 @@ def main() -> None:
     st.caption("Open-source replica of the risk composite — formulas & sources in README.md")
 
     uploaded = st.file_uploader(
-        "Import raw series as CSV (export from Glassnode Studio / CoinMetrics / Coinglass Pro / CoreCharts, see README)",
+        "Import raw series as CSV (optional — live free data is used by default; see README)",
         type=["csv"],
     )
-    if uploaded is None:
-        st.info(
-            "Import a CSV of raw on-chain series to start. See README.md for the "
-            "expected columns and export instructions."
-        )
-        return
-
-    df = pd.read_csv(uploaded)
-    if "date" in df:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce").sort_values()
-        df = df.set_index("date")
+    if uploaded:
+        df = pd.read_csv(uploaded)
+        if "date" in df:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce").sort_values()
+            df = df.set_index("date")
+        st.caption("Source: CSV import")
+    else:
+        df = fetchers.fetch_live_df()
+        if df is None or df.empty:
+            st.info(
+                "No live data available — the BGeometrics fetch returned nothing "
+                "(hourly limit 10 req/hour, or network hiccup). Import a CSV of raw "
+                "series (see README) or try again after the cache expires."
+            )
+            return
+        st.success("Source: live free data — BGeometrics bitcoin-data.com (anonymous, cached 30 min)")
 
     series = derive_series(df)
     available = [k for k, s in series.items() if s.dropna().size >= 2]
     if not available:
         st.warning(
-            "None of the expected columns were found. Expected at least one of: "
-            "market_cap+realized_cap, puell_multiple|daily_issuance_usd, rhodl_ratio, ..."
+            "None of the expected columns/series were found. Expected at least one of: "
+            "mvrv|market_cap+realized_cap, puell_multiple|daily_issuance_usd, rhodl_ratio, ..."
         )
         return
 
     st.success(
         "Computed: " + ", ".join(METRICS[k]["label"] for k in available)
     )
+    missing = [METRICS[k]["label"] for k in ("TransactionFees", "mCTC") if k not in series]
+    if missing:
+        st.caption(
+            "No live/CSV source for: " + ", ".join(missing)
+            + " — provide via CSV import (README) or use Cowen's dashboard."
+        )
 
     # ---- weights: Cowen's sliders (weight 0 = excluded) ------------------
     st.subheader("Weights (screenshot sliders — 0 = excluded)")

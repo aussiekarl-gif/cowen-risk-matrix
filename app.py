@@ -1,5 +1,5 @@
 """
-cowen_risk — open-source, transparent re-implementation of Benjamin Cowen's
+Cowen Risk Matrix — open-source replica of Benjamin Cowen's
 "On-Chain Metrics Historical Risk" composite (Into The Cryptoverse).
 
 Pipeline: nine metrics -> per-metric 0–1 risk score (historical percentile of
@@ -291,9 +291,9 @@ def fmt(x) -> str:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.set_page_config(page_title="Cowen On-Chain Risk (transparent replica)", page_icon="₿")
-    st.title("Cowen On-Chain Metrics Historical Risk")
-    st.caption("Open-source replica of the risk composite — formulas & sources in README.md")
+    st.set_page_config(page_title="Cowen Risk Matrix", page_icon="₿")
+    st.title("Cowen Risk Matrix")
+    st.caption("Cowen On-Chain Metrics Historical Risk — open-source replica — formulas & sources in README.md")
 
     uploaded = st.file_uploader(
         "Import raw series as CSV (optional — live free data is used by default; see README)",

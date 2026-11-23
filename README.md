@@ -1,4 +1,4 @@
-# cowen_risk — open-source replica of Benjamin Cowen's On-Chain Metrics Historical Risk
+# Cowen Risk Matrix — open-source replica of Benjamin Cowen's On-Chain Metrics Historical Risk
 
 A transparent re-implementation of the "On-Chain Metrics Historical Risk" composite
 from [Into The Cryptoverse](https://intothecryptoverse.com) (9 sliders + legend,

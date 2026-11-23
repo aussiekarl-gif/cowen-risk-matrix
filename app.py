@@ -173,6 +173,16 @@ def derive_series(df: pd.DataFrame) -> dict[str, pd.Series]:
         if sd is not None and sd > 0:
             s["MVRVZScore"] = (mc - rc) / sd
 
+    # Realized price (live fill / CSV column): derive Realized Cap = price ×
+    # supply → MVRV when there is no direct mvrv / realized_cap series.
+    if (rp := _col(df, "realized_price_usd", "realised_price_usd")) is not None:
+        if rc is None:
+            supply_rp = _col(df, "circulating_supply", "supply_current")
+            if supply_rp is not None:
+                rc = rp * supply_rp
+        if rc is not None and mc is not None and "MVRV" not in s:
+            s["MVRV"] = mc / rc
+
     # 3) Puell Multiple: Daily issuance value (USD) ÷ 365-day MA of it.
     if (p := _col(df, "puell_multiple")) is not None:
         s["PuellMultiple"] = p

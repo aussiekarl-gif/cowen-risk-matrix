@@ -55,13 +55,26 @@ RHODL ≈ (RealizedValue(1-week band) / RealizedValue(1y–2y band)) × market a
 using the HODL-band series (`age_1w_1m` as the "1-week" proxy, `age_1y_2y` as
 the "1y–2y" band).  For the exact Glassnode/TradingView RHODL, upload a CSV.
 
-### 2. LIVE (optional) — CryptoQuant community, free account
+### 2. LIVE (optional) — your tokens
 
-If you set the `CQ_API_KEY` environment variable (from
-[cryptoquant.com](https://cryptoquant.com), free account), the app fills
-missing canonical series from CryptoQuant's free community endpoints
-(e.g. MVRV Z-Score).  Market-indicator data on CryptoQuant requires
-Professional+ — those are **not** used by this app.
+All token fetchers are opportunistic — each is wrapped in error handling, and
+if a token is missing or rejected, the app silently falls back.  **GitHub
+secrets are not readable via the GitHub API**, so export the tokens as
+environment variables (e.g. `export CRYPTOQUANT_API_KEY=...`) or paste them
+into the app's environment — the app reads env vars.
+
+| Token | Source | Fills (opportunistic) |
+|---|---|---|
+| `CRYPTOQUANT_API_KEY` | CryptoQuant v1 — Professional+ for market-indicator data | MVRV, Realized Price (`realized_price_usd`), Fees (`transaction_fees_usd`), MinerCap (`miner_cap_usd` → mCTC), Supply (`supply_current`) |
+| `CQ_API_KEY` | CryptoQuant community (free account) | MVRV Z-Score |
+| `COINGLASS_API_KEY` | Coinglass Pro (CG-API-KEY header) | Bitcoin RHODL Ratio (`/api/index/bitcoin-rhodl-ratio`), Terminal Price (opportunistic candidates) |
+| `COINGECKO_API` | CoinGecko (anonymous; `x-cg-pro-api-key` for Pro) | Spot market cap |
+| `BGEOMETRICS_TOKEN` / `BITCOIN_DATA_API_TOKEN` | BGeometrics | Sent as `Authorization: Bearer` (the free plan is anonymous-capable; a token may unlock Advanced/full history — your call) |
+| `MANUAL_REALISED_PRICE_USD` | You | Constant realized price in USD; the app derives Realized Cap = price × supply → MVRV |
+
+Not used by this app (from your list): `AUDIT_GITHUB_TOKEN` (GitHub audit
+workflows), `NTFY_TOPIC` (notifications), `TOTAL_CAPITAL_AUD` (a portfolio
+figure), `KOTECHARTS_API` (source not identified).
 
 ### 3. CSV import — CoinMetrics / Glassnode / Coinglass Pro / CoreCharts
 
@@ -74,6 +87,7 @@ Price via your own CDD series, ...).  Expected columns (one per metric):
 | `date` | timestamp (optional; pandas default index used otherwise) |
 | `market_cap` | BTC market cap, USD — Glassnode Studio "Market Cap" |
 | `realized_cap` | Realized cap, USD — Glassnode Studio "Realized Cap" |
+| `realized_price_usd` | Realized price in USD (CoinMetrics "Realized Price") — with `market_cap` + `circulating_supply`, MVRV is derived as market_cap ÷ (realized_price_usd × supply) |
 | `mvrv` | MVRV ratio — Glassnode/CoreCharts (or `market_cap` + `realized_cap`) |
 | `mvrv_zscore` | MVRV Z-Score — Glassnode/CoreCharts (or derived from market cap + realized cap) |
 | `puell_multiple` | or supply `daily_issuance_usd` → Puell derived in-app (issuance ÷ 365d MA) |
